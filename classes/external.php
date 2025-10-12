@@ -323,6 +323,10 @@ class local_devcontrol_external extends external_api {
     /**
      * Parameter definition for get_system_info
      */
+    public static function get_system_info_parameters() {
+        return new external_function_parameters(array());
+    }
+
     public static function get_system_info_returns() {
         return new external_single_structure(array(
             'moodle_version' => new external_value(PARAM_TEXT, 'Moodle version'),
