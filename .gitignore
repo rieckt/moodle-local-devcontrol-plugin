@@ -1,0 +1,55 @@
+# Moodle DevControl Plugin .gitignore
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+
+# Cache files
+cache/
+tmp/
+
+# Vendor files (if using Composer)
+vendor/
+
+# Node modules (if using npm)
+node_modules/
+
+# Build files
+build/
+dist/
+
+# Test files
+test/
+tests/
+*_test.php
+*Test.php
+
+# Coverage reports
+coverage/
+*.coverage
+
+# PHPUnit
+.phpunit.result.cache
