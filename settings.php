@@ -30,10 +30,16 @@ if ($hassiteconfig) {
     $settings = new admin_settingpage('local_devcontrol_settings', new lang_string('settings', 'local_devcontrol'));
     
     if ($ADMIN->fulltree) {
+        // Enable/Disable plugin
         $settings->add(new admin_setting_configcheckbox('local_devcontrol/enabled',
             new lang_string('enabled', 'local_devcontrol'),
             new lang_string('enabled_desc', 'local_devcontrol'),
             1));
+        
+        // Docker configuration
+        $settings->add(new admin_setting_heading('local_devcontrol_docker',
+            new lang_string('docker_settings', 'local_devcontrol'),
+            new lang_string('docker_settings_desc', 'local_devcontrol')));
             
         $settings->add(new admin_setting_configtext('local_devcontrol/docker_path',
             new lang_string('docker_path', 'local_devcontrol'),
@@ -41,11 +47,55 @@ if ($hassiteconfig) {
             'docker',
             PARAM_TEXT));
             
+        $settings->add(new admin_setting_configtext('local_devcontrol/docker_timeout',
+            new lang_string('docker_timeout', 'local_devcontrol'),
+            new lang_string('docker_timeout_desc', 'local_devcontrol'),
+            30,
+            PARAM_INT));
+        
+        // Backup configuration
+        $settings->add(new admin_setting_heading('local_devcontrol_backup',
+            new lang_string('backup_settings', 'local_devcontrol'),
+            new lang_string('backup_settings_desc', 'local_devcontrol')));
+            
         $settings->add(new admin_setting_configtext('local_devcontrol/backup_path',
             new lang_string('backup_path', 'local_devcontrol'),
             new lang_string('backup_path_desc', 'local_devcontrol'),
             '',
             PARAM_TEXT));
+            
+        $settings->add(new admin_setting_configtext('local_devcontrol/mysql_user',
+            new lang_string('mysql_user', 'local_devcontrol'),
+            new lang_string('mysql_user_desc', 'local_devcontrol'),
+            'moodle',
+            PARAM_TEXT));
+            
+        $settings->add(new admin_setting_configpasswordunmask('local_devcontrol/mysql_password',
+            new lang_string('mysql_password', 'local_devcontrol'),
+            new lang_string('mysql_password_desc', 'local_devcontrol'),
+            'moodle'));
+            
+        $settings->add(new admin_setting_configtext('local_devcontrol/mysql_database',
+            new lang_string('mysql_database', 'local_devcontrol'),
+            new lang_string('mysql_database_desc', 'local_devcontrol'),
+            'moodle',
+            PARAM_TEXT));
+        
+        // Security settings
+        $settings->add(new admin_setting_heading('local_devcontrol_security',
+            new lang_string('security_settings', 'local_devcontrol'),
+            new lang_string('security_settings_desc', 'local_devcontrol')));
+            
+        $settings->add(new admin_setting_configtext('local_devcontrol/rate_limit',
+            new lang_string('rate_limit', 'local_devcontrol'),
+            new lang_string('rate_limit_desc', 'local_devcontrol'),
+            60,
+            PARAM_INT));
+            
+        $settings->add(new admin_setting_configcheckbox('local_devcontrol/log_actions',
+            new lang_string('log_actions', 'local_devcontrol'),
+            new lang_string('log_actions_desc', 'local_devcontrol'),
+            1));
     }
     
     $ADMIN->add('local_devcontrol', $settings);

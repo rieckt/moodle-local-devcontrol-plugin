@@ -1,14 +1,26 @@
 # Moodle DevControl Plugin
 
-A Moodle local plugin that provides webservice functions for managing Docker containers and system operations in a development environment.
+A comprehensive Moodle local plugin that provides webservice functions and web interface for managing Docker containers, system operations, and development environment tools.
 
 ## Features
+
+### Core Functionality
 
 - **Docker Container Management**: Start, stop, and restart Docker containers
 - **Container Status**: Get detailed information about running containers
 - **Log Access**: Retrieve container logs for debugging
 - **Backup/Restore**: Backup and restore Moodle database
 - **System Information**: Get system and Docker status information
+
+### Advanced Features
+
+- **User Management**: View and manage Moodle users
+- **Plugin Information**: Get installed plugin details
+- **System Metrics**: Monitor active sessions, cron jobs, and tasks
+- **Database Statistics**: View database size and table information
+- **Rate Limiting**: Built-in API rate limiting for security
+- **Structured Logging**: Comprehensive audit logging
+- **Granular Permissions**: Fine-grained capability system
 
 ## Installation
 
@@ -76,6 +88,14 @@ Go to **Site administration > Plugins > Local plugins > DevControl** to configur
 
 - `local_devcontrol_backup_restore`: Backup or restore Moodle database
 
+### Advanced Functions
+
+- `local_devcontrol_get_users`: Get paginated user list with search
+- `local_devcontrol_get_user_count`: Get total user count
+- `local_devcontrol_get_plugins`: Get installed plugin information
+- `local_devcontrol_get_metrics`: Get system metrics and statistics
+- `local_devcontrol_get_database_stats`: Get database statistics and table sizes
+
 ## API Usage Examples
 
 ### Get System Information
@@ -117,18 +137,42 @@ curl "http://localhost:8000/webservice/rest/server.php" \
 
 ## Permissions
 
-The plugin requires the following capabilities:
+The plugin uses a granular capability system:
 
-- `moodle/site:config`: For all webservice functions
-- `local/devcontrol:view`: To view DevControl information
-- `local/devcontrol:manage`: To manage DevControl settings
+### Core Capabilities
+
+- `local/devcontrol:view`: View DevControl information and system status
+- `local/devcontrol:manage`: Manage DevControl settings and configuration
+- `local/devcontrol:containers`: Manage Docker containers (start, stop, restart)
+- `local/devcontrol:backup`: Perform backup and restore operations
+
+### Default Role Assignments
+
+- **Manager**: All capabilities
+- **User**: No capabilities (prevented)
 
 ## Security
 
-- All webservice functions require `moodle/site:config` capability
+### Authentication & Authorization
+
+- Granular capability system with specific permissions
+- Session key validation for web actions
+- Rate limiting to prevent abuse
+- Input validation and sanitization
+
+### Data Protection
+
 - Docker commands are executed with system privileges
-- Backup files are stored in moodledata/backup directory
-- Input validation is performed on all parameters
+- Backup files are stored in configurable backup directory
+- MySQL credentials stored securely in Moodle config
+- Container name validation prevents path traversal
+
+### Audit & Logging
+
+- Comprehensive action logging
+- Structured event system
+- Error logging with context
+- Rate limit tracking
 
 ## Troubleshooting
 
@@ -158,12 +202,33 @@ If backup operations fail:
 
 ## Development
 
+### Plugin Structure
+
+```
+local/devcontrol/
+├── classes/
+│   ├── external.php          # Webservice API implementation
+│   └── event/
+│       └── action_performed.php  # Event logging
+├── db/
+│   ├── access.php            # Capability definitions
+│   └── services.php          # Webservice definitions
+├── lang/en/
+│   └── local_devcontrol.php  # Language strings
+├── lib.php                   # Plugin library functions
+├── settings.php              # Admin settings
+├── index.php                 # Dashboard interface
+├── action.php                # Container management actions
+└── version.php               # Plugin version info
+```
+
 ### Adding New Functions
 
 1. Add function definition to `db/services.php`
 2. Implement function in `classes/external.php`
 3. Add parameter and return definitions
 4. Update language strings in `lang/en/local_devcontrol.php`
+5. Add capability checks and logging
 
 ### Testing
 
@@ -190,6 +255,16 @@ For issues and questions:
 3. Contact the development team
 
 ## Changelog
+
+### Version 1.1.0 (Current)
+
+- **Security Enhancements**: Granular capability system, rate limiting, input validation
+- **Improved Error Handling**: Moodle-specific exceptions, structured logging
+- **Enhanced Settings**: Docker timeout, MySQL credentials, security options
+- **Web Interface**: Dashboard and container management UI
+- **Advanced Functions**: User management, plugin info, system metrics, database stats
+- **Database Optimization**: Prepared statements, improved queries
+- **Navigation Integration**: Admin menu integration, settings navigation
 
 ### Version 1.0.0
 

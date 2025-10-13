@@ -42,10 +42,34 @@ $string['restart_container'] = 'Restart a specific Docker container';
 $string['settings'] = 'DevControl Settings';
 $string['enabled'] = 'Enable DevControl';
 $string['enabled_desc'] = 'Enable DevControl plugin functionality';
+
+// Docker settings
+$string['docker_settings'] = 'Docker Configuration';
+$string['docker_settings_desc'] = 'Configure Docker executable and timeout settings';
 $string['docker_path'] = 'Docker Path';
 $string['docker_path_desc'] = 'Path to Docker executable (default: docker)';
+$string['docker_timeout'] = 'Docker Timeout';
+$string['docker_timeout_desc'] = 'Timeout for Docker commands in seconds (default: 30)';
+
+// Backup settings
+$string['backup_settings'] = 'Backup Configuration';
+$string['backup_settings_desc'] = 'Configure backup and restore settings';
 $string['backup_path'] = 'Backup Path';
 $string['backup_path_desc'] = 'Path for backup files (default: moodledata/backup)';
+$string['mysql_user'] = 'MySQL User';
+$string['mysql_user_desc'] = 'MySQL username for backup operations';
+$string['mysql_password'] = 'MySQL Password';
+$string['mysql_password_desc'] = 'MySQL password for backup operations';
+$string['mysql_database'] = 'MySQL Database';
+$string['mysql_database_desc'] = 'MySQL database name for backup operations';
+
+// Security settings
+$string['security_settings'] = 'Security Settings';
+$string['security_settings_desc'] = 'Configure security and rate limiting';
+$string['rate_limit'] = 'Rate Limit';
+$string['rate_limit_desc'] = 'Maximum API calls per minute per user (default: 60)';
+$string['log_actions'] = 'Log Actions';
+$string['log_actions_desc'] = 'Log all DevControl actions for audit purposes';
 
 // Capabilities
 $string['devcontrol:view'] = 'View DevControl information';
@@ -65,3 +89,11 @@ $string['success_container_stopped'] = 'Container stopped successfully';
 $string['success_container_restarted'] = 'Container restarted successfully';
 $string['success_backup_created'] = 'Backup created successfully';
 $string['success_restore_completed'] = 'Restore completed successfully';
+
+// Event strings
+$string['eventactionperformed'] = 'DevControl action performed';
+
+// Error strings
+$string['system_info_error'] = 'Failed to retrieve system information';
+$string['users_retrieval_error'] = 'Failed to retrieve users';
+$string['ratelimit'] = 'Rate limit exceeded. Please try again later.';

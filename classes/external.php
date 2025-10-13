@@ -25,6 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/externallib.php');
+require_once($CFG->dirroot . '/local/devcontrol/lib.php');
 
 /**
  * DevControl External API Class
@@ -40,10 +41,10 @@ class local_devcontrol_external extends external_api {
         global $CFG;
 
         try {
-            // Validate context
+            // Validate context and capabilities
             $context = context_system::instance();
             self::validate_context($context);
-            require_capability('moodle/site:config', $context);
+            require_capability('local/devcontrol:view', $context);
 
             $info = array(
                 'success' => true,
@@ -59,42 +60,13 @@ class local_devcontrol_external extends external_api {
 
             return $info;
         } catch (Exception $e) {
-            // Log error for debugging
-            error_log("DevControl get_system_info error: " . $e->getMessage());
+            // Log error using Moodle's logging system
+            local_devcontrol_log('get_system_info', 'Error: ' . $e->getMessage(), false);
             
-            return array(
-                'success' => false,
-                'error' => 'Failed to retrieve system information',
-                'error_code' => 'SYSTEM_INFO_ERROR',
-                'timestamp' => time()
-            );
+            throw new moodle_exception('system_info_error', 'local_devcontrol', '', null, $e->getMessage());
         }
     }
 
-    /**
-     * Validate container name for security
-     *
-     * @param string $container Container name
-     * @return bool
-     */
-    private static function validate_container_name($container) {
-        // Only allow alphanumeric, hyphens, underscores, and dots
-        if (!preg_match('/^[a-zA-Z0-9._-]+$/', $container)) {
-            return false;
-        }
-        
-        // Prevent path traversal attempts
-        if (strpos($container, '..') !== false || strpos($container, '/') !== false) {
-            return false;
-        }
-        
-        // Limit length
-        if (strlen($container) > 100) {
-            return false;
-        }
-        
-        return true;
-    }
 
     /**
      * Check rate limiting for API calls
@@ -109,7 +81,7 @@ class local_devcontrol_external extends external_api {
         $user_id = $USER->id;
         $minute_ago = time() - 60;
         
-        // Count calls in the last minute
+        // Count calls in the last minute using prepared statement
         $count = $DB->count_records_sql(
             "SELECT COUNT(*) FROM {log} 
              WHERE userid = ? AND action = ? AND time > ?",
@@ -141,10 +113,10 @@ class local_devcontrol_external extends external_api {
     public static function manage_containers($action, $container) {
         global $CFG;
 
-        // Validate context
+        // Validate context and capabilities
         $context = context_system::instance();
         self::validate_context($context);
-        require_capability('moodle/site:config', $context);
+        require_capability('local/devcontrol:containers', $context);
 
         // Validate parameters
         $valid_actions = array('start', 'stop', 'restart');
@@ -153,11 +125,14 @@ class local_devcontrol_external extends external_api {
         }
         
         // Validate container name for security
-        if (!self::validate_container_name($container)) {
+        if (!local_devcontrol_validate_container_name($container)) {
             throw new invalid_parameter_exception('Invalid container name');
         }
 
         $result = self::execute_docker_command($action, $container);
+        
+        // Log the action
+        local_devcontrol_log('manage_containers', "Action: $action, Container: $container", $result['success']);
 
         return array(
             'success' => $result['success'],
@@ -350,8 +325,8 @@ class local_devcontrol_external extends external_api {
                  FROM {user} 
                  WHERE $where AND deleted = 0 AND id > 1 
                  ORDER BY lastaccess DESC 
-                 LIMIT $perpage OFFSET $offset",
-                $params
+                 LIMIT ? OFFSET ?",
+                array_merge($params, array($perpage, $offset))
             );
 
             $result = array();
@@ -402,7 +377,9 @@ class local_devcontrol_external extends external_api {
         self::validate_context($context);
         require_capability('moodle/site:config', $context);
 
-        $count = $DB->count_records('user', array('deleted' => 0), 'id > 1');
+        $count = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {user} WHERE deleted = 0 AND id > 1"
+        );
 
         return array(
             'success' => true,
@@ -423,23 +400,36 @@ class local_devcontrol_external extends external_api {
         self::validate_context($context);
         require_capability('moodle/site:config', $context);
 
-        $plugins = $DB->get_records('config_plugins', array('plugin' => 'core'), '', 'plugin, name, value');
-
         $result = array();
-        foreach ($plugins as $plugin) {
-            if (strpos($plugin->name, 'version') !== false) {
-                $component = str_replace('_version', '', $plugin->name);
-                $result[] = array(
-                    'component' => $component,
-                    'type' => 'core',
-                    'name' => $component,
-                    'displayname' => ucfirst(str_replace('_', ' ', $component)),
-                    'release' => 'Unknown',
-                    'version' => $plugin->value,
-                    'enabled' => 1,
-                    'source' => 'core'
-                );
-            }
+
+        // Get modules (activity plugins)
+        $modules = $DB->get_records('modules', array(), '', 'name, visible');
+        foreach ($modules as $module) {
+            $result[] = array(
+                'component' => 'mod_' . $module->name,
+                'type' => 'mod',
+                'name' => $module->name,
+                'displayname' => ucfirst(str_replace('_', ' ', $module->name)),
+                'release' => 'Unknown',
+                'version' => 'Unknown',
+                'enabled' => $module->visible ? 1 : 0,
+                'source' => 'core'
+            );
+        }
+
+        // Get blocks
+        $blocks = $DB->get_records('block', array(), '', 'name, visible');
+        foreach ($blocks as $block) {
+            $result[] = array(
+                'component' => 'block_' . $block->name,
+                'type' => 'block',
+                'name' => $block->name,
+                'displayname' => ucfirst(str_replace('_', ' ', $block->name)),
+                'release' => 'Unknown',
+                'version' => 'Unknown',
+                'enabled' => $block->visible ? 1 : 0,
+                'source' => 'core'
+            );
         }
 
         return array(
@@ -461,15 +451,20 @@ class local_devcontrol_external extends external_api {
         self::validate_context($context);
         require_capability('moodle/site:config', $context);
 
-        // Get active sessions
-        $active_sessions = $DB->count_records('sessions', array(), 'timemodified > ?', array(time() - 300));
+        // Get active sessions using prepared statement
+        $active_sessions = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {sessions} WHERE timemodified > ?",
+            array(time() - 300)
+        );
 
         // Get cron info
         $cron_lastrun = get_config('core', 'lastcronstart') ?: 0;
         $cron_nextrun = $cron_lastrun + 3600; // Default 1 hour
 
-        // Get adhoc tasks
-        $adhoc_tasks = $DB->count_records('task_adhoc');
+        // Get adhoc tasks using prepared statement
+        $adhoc_tasks = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {task_adhoc}"
+        );
 
         return array(
             'success' => true,
@@ -495,20 +490,29 @@ class local_devcontrol_external extends external_api {
         self::validate_context($context);
         require_capability('moodle/site:config', $context);
 
-        // Get course count
-        $course_count = $DB->count_records('course', array('id' => 1), 'id > 1');
+        // Get course count using prepared statement
+        $course_count = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {course} WHERE id > 1"
+        );
 
-        // Get user count
-        $user_count = $DB->count_records('user', array('deleted' => 0), 'id > 1');
+        // Get user count using prepared statement
+        $user_count = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {user} WHERE deleted = 0 AND id > 1"
+        );
 
         // Get table count
         $tables = $DB->get_tables();
         $table_count = count($tables);
 
-        // Get largest tables
+        // Get largest tables using prepared statement
         $largest_tables = array();
         foreach ($tables as $table) {
-            $size = $DB->get_record_sql("SELECT ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb FROM information_schema.TABLES WHERE table_schema = DATABASE() AND table_name = ?", array($table));
+            $size = $DB->get_record_sql(
+                "SELECT ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb 
+                 FROM information_schema.TABLES 
+                 WHERE table_schema = DATABASE() AND table_name = ?", 
+                array($table)
+            );
             if ($size && $size->size_mb > 0) {
                 $largest_tables[] = array(
                     'name' => $table,
@@ -578,7 +582,8 @@ class local_devcontrol_external extends external_api {
      * @return array
      */
     private static function execute_docker_command($command, $container = '', $args = array()) {
-        $cmd = "docker $command";
+        $docker_path = local_devcontrol_get_docker_path();
+        $cmd = "$docker_path $command";
         if (!empty($container)) {
             $cmd .= " $container";
         }
@@ -608,7 +613,7 @@ class local_devcontrol_external extends external_api {
     private static function execute_backup_restore($action, $filename) {
         global $CFG;
 
-        $backup_dir = $CFG->dataroot . '/backup';
+        $backup_dir = local_devcontrol_get_backup_path();
         if (!is_dir($backup_dir)) {
             mkdir($backup_dir, 0755, true);
         }
