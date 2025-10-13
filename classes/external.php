@@ -405,6 +405,10 @@ class local_devcontrol_external extends external_api {
     /**
      * Parameter definition for get_container_status
      */
+    public static function get_container_status_parameters() {
+        return new external_function_parameters(array());
+    }
+
     public static function get_container_status_returns() {
         return new external_single_structure(array(
             'success' => new external_value(PARAM_BOOL, 'Success status'),
