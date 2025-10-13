@@ -39,23 +39,96 @@ class local_devcontrol_external extends external_api {
     public static function get_system_info() {
         global $CFG;
 
-        // Validate context
-        $context = context_system::instance();
-        self::validate_context($context);
-        require_capability('moodle/site:config', $context);
+        try {
+            // Validate context
+            $context = context_system::instance();
+            self::validate_context($context);
+            require_capability('moodle/site:config', $context);
 
-        $info = array(
-            'moodle_version' => $CFG->version,
-            'moodle_release' => $CFG->release,
-            'site_name' => $CFG->fullname,
-            'site_url' => $CFG->wwwroot,
-            'php_version' => phpversion(),
-            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
-            'timestamp' => time(),
-            'docker_status' => self::get_docker_status(),
+            $info = array(
+                'success' => true,
+                'moodle_version' => $CFG->version,
+                'moodle_release' => $CFG->release,
+                'site_name' => $CFG->fullname,
+                'site_url' => $CFG->wwwroot,
+                'php_version' => phpversion(),
+                'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
+                'timestamp' => time(),
+                'docker_status' => self::get_docker_status(),
+            );
+
+            return $info;
+        } catch (Exception $e) {
+            // Log error for debugging
+            error_log("DevControl get_system_info error: " . $e->getMessage());
+            
+            return array(
+                'success' => false,
+                'error' => 'Failed to retrieve system information',
+                'error_code' => 'SYSTEM_INFO_ERROR',
+                'timestamp' => time()
+            );
+        }
+    }
+
+    /**
+     * Validate container name for security
+     *
+     * @param string $container Container name
+     * @return bool
+     */
+    private static function validate_container_name($container) {
+        // Only allow alphanumeric, hyphens, underscores, and dots
+        if (!preg_match('/^[a-zA-Z0-9._-]+$/', $container)) {
+            return false;
+        }
+        
+        // Prevent path traversal attempts
+        if (strpos($container, '..') !== false || strpos($container, '/') !== false) {
+            return false;
+        }
+        
+        // Limit length
+        if (strlen($container) > 100) {
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Check rate limiting for API calls
+     *
+     * @param string $function Function name
+     * @param int $limit Maximum calls per minute
+     * @return bool
+     */
+    private static function check_rate_limit($function, $limit = 60) {
+        global $DB, $USER;
+        
+        $user_id = $USER->id;
+        $minute_ago = time() - 60;
+        
+        // Count calls in the last minute
+        $count = $DB->count_records_sql(
+            "SELECT COUNT(*) FROM {log} 
+             WHERE userid = ? AND action = ? AND time > ?",
+            array($user_id, $function, $minute_ago)
         );
-
-        return $info;
+        
+        if ($count >= $limit) {
+            return false;
+        }
+        
+        // Log this call
+        $DB->insert_record('log', array(
+            'userid' => $user_id,
+            'action' => $function,
+            'time' => time(),
+            'ip' => getremoteaddr()
+        ));
+        
+        return true;
     }
 
     /**
@@ -77,6 +150,11 @@ class local_devcontrol_external extends external_api {
         $valid_actions = array('start', 'stop', 'restart');
         if (!in_array($action, $valid_actions)) {
             throw new invalid_parameter_exception('Invalid action');
+        }
+        
+        // Validate container name for security
+        if (!self::validate_container_name($container)) {
+            throw new invalid_parameter_exception('Invalid container name');
         }
 
         $result = self::execute_docker_command($action, $container);
@@ -215,6 +293,266 @@ class local_devcontrol_external extends external_api {
      */
     public static function restart_container($container) {
         return self::manage_containers('restart', $container);
+    }
+
+    /**
+     * Get Moodle users
+     *
+     * @param int $page Page number
+     * @param int $perpage Users per page
+     * @param string $search Search term
+     * @return array
+     */
+    public static function get_users($page = 0, $perpage = 50, $search = '') {
+        global $DB;
+
+        try {
+            // Enable read-only session for better performance
+            if (defined('MOODLE_INTERNAL') && !defined('READ_ONLY_SESSION')) {
+                define('READ_ONLY_SESSION', true);
+            }
+            
+            // Validate context
+            $context = context_system::instance();
+            self::validate_context($context);
+            require_capability('moodle/site:config', $context);
+
+            // Check rate limiting
+            if (!self::check_rate_limit('get_users', 30)) {
+                throw new moodle_exception('ratelimit', 'local_devcontrol', '', null, 'Too many requests');
+            }
+
+            // Input validation - fail fast
+            if ($page < 0) {
+                throw new invalid_parameter_exception('Page number must be non-negative');
+            }
+            if ($perpage < 1 || $perpage > 1000) {
+                throw new invalid_parameter_exception('Per page must be between 1 and 1000');
+            }
+            if (strlen($search) > 255) {
+                throw new invalid_parameter_exception('Search term too long');
+            }
+
+            $params = array();
+            $where = '1=1';
+            
+            if (!empty($search)) {
+                // Sanitize search term
+                $search = trim($search);
+                $where .= ' AND (firstname LIKE ? OR lastname LIKE ? OR username LIKE ? OR email LIKE ?)';
+                $searchterm = '%' . $search . '%';
+                $params = array($searchterm, $searchterm, $searchterm, $searchterm);
+            }
+
+            $offset = $page * $perpage;
+            $users = $DB->get_records_sql(
+                "SELECT id, username, firstname, lastname, email, suspended, lastaccess, timecreated 
+                 FROM {user} 
+                 WHERE $where AND deleted = 0 AND id > 1 
+                 ORDER BY lastaccess DESC 
+                 LIMIT $perpage OFFSET $offset",
+                $params
+            );
+
+            $result = array();
+            foreach ($users as $user) {
+                $result[] = array(
+                    'id' => $user->id,
+                    'username' => $user->username,
+                    'firstname' => $user->firstname,
+                    'lastname' => $user->lastname,
+                    'fullname' => $user->firstname . ' ' . $user->lastname,
+                    'email' => $user->email,
+                    'suspended' => $user->suspended,
+                    'lastaccess' => $user->lastaccess,
+                    'timecreated' => $user->timecreated,
+                    'roles' => self::get_user_roles($user->id)
+                );
+            }
+
+            return array(
+                'success' => true,
+                'users' => $result,
+                'total' => count($result)
+            );
+        } catch (Exception $e) {
+            // Log error for debugging
+            error_log("DevControl get_users error: " . $e->getMessage());
+            
+            return array(
+                'success' => false,
+                'error' => 'Failed to retrieve users',
+                'error_code' => 'USERS_RETRIEVAL_ERROR',
+                'users' => array(),
+                'total' => 0
+            );
+        }
+    }
+
+    /**
+     * Get Moodle user count
+     *
+     * @return array
+     */
+    public static function get_user_count() {
+        global $DB;
+
+        // Validate context
+        $context = context_system::instance();
+        self::validate_context($context);
+        require_capability('moodle/site:config', $context);
+
+        $count = $DB->count_records('user', array('deleted' => 0), 'id > 1');
+
+        return array(
+            'success' => true,
+            'count' => $count
+        );
+    }
+
+    /**
+     * Get Moodle plugins
+     *
+     * @return array
+     */
+    public static function get_plugins() {
+        global $DB;
+
+        // Validate context
+        $context = context_system::instance();
+        self::validate_context($context);
+        require_capability('moodle/site:config', $context);
+
+        $plugins = $DB->get_records('config_plugins', array('plugin' => 'core'), '', 'plugin, name, value');
+
+        $result = array();
+        foreach ($plugins as $plugin) {
+            if (strpos($plugin->name, 'version') !== false) {
+                $component = str_replace('_version', '', $plugin->name);
+                $result[] = array(
+                    'component' => $component,
+                    'type' => 'core',
+                    'name' => $component,
+                    'displayname' => ucfirst(str_replace('_', ' ', $component)),
+                    'release' => 'Unknown',
+                    'version' => $plugin->value,
+                    'enabled' => 1,
+                    'source' => 'core'
+                );
+            }
+        }
+
+        return array(
+            'success' => true,
+            'plugins' => $result
+        );
+    }
+
+    /**
+     * Get Moodle metrics
+     *
+     * @return array
+     */
+    public static function get_metrics() {
+        global $DB;
+
+        // Validate context
+        $context = context_system::instance();
+        self::validate_context($context);
+        require_capability('moodle/site:config', $context);
+
+        // Get active sessions
+        $active_sessions = $DB->count_records('sessions', array(), 'timemodified > ?', array(time() - 300));
+
+        // Get cron info
+        $cron_lastrun = get_config('core', 'lastcronstart') ?: 0;
+        $cron_nextrun = $cron_lastrun + 3600; // Default 1 hour
+
+        // Get adhoc tasks
+        $adhoc_tasks = $DB->count_records('task_adhoc');
+
+        return array(
+            'success' => true,
+            'metrics' => array(
+                'active_sessions' => $active_sessions,
+                'cron_lastrun' => $cron_lastrun,
+                'cron_nextrun' => $cron_nextrun,
+                'adhoc_tasks_pending' => $adhoc_tasks
+            )
+        );
+    }
+
+    /**
+     * Get database statistics
+     *
+     * @return array
+     */
+    public static function get_database_stats() {
+        global $DB;
+
+        // Validate context
+        $context = context_system::instance();
+        self::validate_context($context);
+        require_capability('moodle/site:config', $context);
+
+        // Get course count
+        $course_count = $DB->count_records('course', array('id' => 1), 'id > 1');
+
+        // Get user count
+        $user_count = $DB->count_records('user', array('deleted' => 0), 'id > 1');
+
+        // Get table count
+        $tables = $DB->get_tables();
+        $table_count = count($tables);
+
+        // Get largest tables
+        $largest_tables = array();
+        foreach ($tables as $table) {
+            $size = $DB->get_record_sql("SELECT ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb FROM information_schema.TABLES WHERE table_schema = DATABASE() AND table_name = ?", array($table));
+            if ($size && $size->size_mb > 0) {
+                $largest_tables[] = array(
+                    'name' => $table,
+                    'size_mb' => $size->size_mb
+                );
+            }
+        }
+        usort($largest_tables, function($a, $b) { return $b['size_mb'] <=> $a['size_mb']; });
+        $largest_tables = array_slice($largest_tables, 0, 10);
+
+        return array(
+            'success' => true,
+            'stats' => array(
+                'course_count' => $course_count,
+                'user_count' => $user_count,
+                'table_count' => $table_count,
+                'largest_tables' => $largest_tables
+            )
+        );
+    }
+
+    /**
+     * Get user roles
+     *
+     * @param int $userid User ID
+     * @return string
+     */
+    private static function get_user_roles($userid) {
+        global $DB;
+
+        $roles = $DB->get_records_sql(
+            "SELECT r.shortname 
+             FROM {role_assignments} ra 
+             JOIN {role} r ON ra.roleid = r.id 
+             WHERE ra.userid = ? AND ra.contextid = 1",
+            array($userid)
+        );
+
+        $role_names = array();
+        foreach ($roles as $role) {
+            $role_names[] = $role->shortname;
+        }
+
+        return implode(', ', $role_names) ?: 'user';
     }
 
     /**
@@ -462,5 +800,119 @@ class local_devcontrol_external extends external_api {
 
     public static function restart_container_returns() {
         return self::manage_containers_returns();
+    }
+
+    /**
+     * Parameter definition for get_users
+     */
+    public static function get_users_parameters() {
+        return new external_function_parameters(array(
+            'page' => new external_value(PARAM_INT, 'Page number', VALUE_DEFAULT, 0),
+            'perpage' => new external_value(PARAM_INT, 'Users per page', VALUE_DEFAULT, 50),
+            'search' => new external_value(PARAM_TEXT, 'Search term', VALUE_DEFAULT, ''),
+        ));
+    }
+
+    public static function get_users_returns() {
+        return new external_single_structure(array(
+            'success' => new external_value(PARAM_BOOL, 'Success status'),
+            'users' => new external_multiple_structure(
+                new external_single_structure(array(
+                    'id' => new external_value(PARAM_INT, 'User ID'),
+                    'username' => new external_value(PARAM_TEXT, 'Username'),
+                    'firstname' => new external_value(PARAM_TEXT, 'First name'),
+                    'lastname' => new external_value(PARAM_TEXT, 'Last name'),
+                    'fullname' => new external_value(PARAM_TEXT, 'Full name'),
+                    'email' => new external_value(PARAM_TEXT, 'Email'),
+                    'suspended' => new external_value(PARAM_INT, 'Suspended status'),
+                    'lastaccess' => new external_value(PARAM_INT, 'Last access time'),
+                    'timecreated' => new external_value(PARAM_INT, 'Creation time'),
+                    'roles' => new external_value(PARAM_TEXT, 'User roles'),
+                ))
+            ),
+            'total' => new external_value(PARAM_INT, 'Total users'),
+        ));
+    }
+
+    /**
+     * Parameter definition for get_user_count
+     */
+    public static function get_user_count_parameters() {
+        return new external_function_parameters(array());
+    }
+
+    public static function get_user_count_returns() {
+        return new external_single_structure(array(
+            'success' => new external_value(PARAM_BOOL, 'Success status'),
+            'count' => new external_value(PARAM_INT, 'User count'),
+        ));
+    }
+
+    /**
+     * Parameter definition for get_plugins
+     */
+    public static function get_plugins_parameters() {
+        return new external_function_parameters(array());
+    }
+
+    public static function get_plugins_returns() {
+        return new external_single_structure(array(
+            'success' => new external_value(PARAM_BOOL, 'Success status'),
+            'plugins' => new external_multiple_structure(
+                new external_single_structure(array(
+                    'component' => new external_value(PARAM_TEXT, 'Component name'),
+                    'type' => new external_value(PARAM_TEXT, 'Plugin type'),
+                    'name' => new external_value(PARAM_TEXT, 'Plugin name'),
+                    'displayname' => new external_value(PARAM_TEXT, 'Display name'),
+                    'release' => new external_value(PARAM_TEXT, 'Release version'),
+                    'version' => new external_value(PARAM_TEXT, 'Version'),
+                    'enabled' => new external_value(PARAM_INT, 'Enabled status'),
+                    'source' => new external_value(PARAM_TEXT, 'Source'),
+                ))
+            ),
+        ));
+    }
+
+    /**
+     * Parameter definition for get_metrics
+     */
+    public static function get_metrics_parameters() {
+        return new external_function_parameters(array());
+    }
+
+    public static function get_metrics_returns() {
+        return new external_single_structure(array(
+            'success' => new external_value(PARAM_BOOL, 'Success status'),
+            'metrics' => new external_single_structure(array(
+                'active_sessions' => new external_value(PARAM_INT, 'Active sessions'),
+                'cron_lastrun' => new external_value(PARAM_INT, 'Cron last run'),
+                'cron_nextrun' => new external_value(PARAM_INT, 'Cron next run'),
+                'adhoc_tasks_pending' => new external_value(PARAM_INT, 'Adhoc tasks pending'),
+            )),
+        ));
+    }
+
+    /**
+     * Parameter definition for get_database_stats
+     */
+    public static function get_database_stats_parameters() {
+        return new external_function_parameters(array());
+    }
+
+    public static function get_database_stats_returns() {
+        return new external_single_structure(array(
+            'success' => new external_value(PARAM_BOOL, 'Success status'),
+            'stats' => new external_single_structure(array(
+                'course_count' => new external_value(PARAM_INT, 'Course count'),
+                'user_count' => new external_value(PARAM_INT, 'User count'),
+                'table_count' => new external_value(PARAM_INT, 'Table count'),
+                'largest_tables' => new external_multiple_structure(
+                    new external_single_structure(array(
+                        'name' => new external_value(PARAM_TEXT, 'Table name'),
+                        'size_mb' => new external_value(PARAM_FLOAT, 'Size in MB'),
+                    ))
+                ),
+            )),
+        ));
     }
 }
