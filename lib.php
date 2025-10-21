@@ -150,7 +150,7 @@ function local_devcontrol_extend_navigation(global_navigation $nav) {
     }
     
     // Add DevControl node to admin section
-    $adminnode = $nav->find('siteadmin', global_navigation::TYPE_SITEADMIN);
+    $adminnode = $nav->find('siteadmin', global_navigation::TYPE_SITE_ADMIN);
     if ($adminnode) {
         $devcontrolnode = $adminnode->add(
             get_string('pluginname', 'local_devcontrol'),
@@ -177,7 +177,7 @@ function local_devcontrol_extend_settings_navigation(settings_navigation $nav, c
     }
     
     // Add DevControl settings to admin section
-    $adminnode = $nav->find('root', settings_navigation::TYPE_SITEADMIN);
+    $adminnode = $nav->find('root', settings_navigation::TYPE_SITE_ADMIN);
     if ($adminnode) {
         $devcontrolnode = $adminnode->add(
             get_string('pluginname', 'local_devcontrol'),
